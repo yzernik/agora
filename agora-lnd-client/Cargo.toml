@@ -21,6 +21,7 @@ prost = "0.8.0"
 regex = "1.5.4"
 tonic = "0.5.2"
 tower = "0.4.8"
+tonic_lnd = "0.3.0"
 
 [dependencies.openssl]
 version = "0.10.35"

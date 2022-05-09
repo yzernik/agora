@@ -94,27 +94,12 @@ impl Server {
   ) -> Result<Option<agora_lnd_client::Client>> {
     match &arguments.lnd_rpc_authority {
       Some(lnd_rpc_authority) => {
-        let lnd_rpc_cert = match &arguments.lnd_rpc_cert_path {
-          Some(path) => {
-            let pem = tokio::fs::read_to_string(&path)
-              .await
-              .context(error::FilesystemIo { path })?;
-            Some(X509::from_pem(pem.as_bytes()).context(error::LndRpcCertificateParse)?)
-          }
-          None => None,
-        };
-
-        let lnd_rpc_macaroon = match &arguments.lnd_rpc_macaroon_path {
-          Some(path) => Some(
-            tokio::fs::read(&path)
-              .await
-              .context(error::FilesystemIo { path })?,
-          ),
-          None => None,
-        };
-
         let mut client =
-          agora_lnd_client::Client::new(lnd_rpc_authority.clone(), lnd_rpc_cert, lnd_rpc_macaroon)
+              agora_lnd_client::Client::new(
+		  lnd_rpc_authority.clone(),
+		  &arguments.lnd_rpc_cert_path,
+		  &arguments.lnd_rpc_macaroon_path,
+	      )
             .await
             .context(error::LndRpcConnect)?;
 

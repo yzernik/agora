@@ -1,15 +1,11 @@
 use {
-  crate::https_service::HttpsService,
   http::uri::Authority,
-  lnrpc::{
-    lightning_client::LightningClient, AddInvoiceResponse, Invoice, ListInvoiceRequest, PaymentHash,
+  tonic_lnd::rpc::{
+    AddInvoiceResponse, Invoice, PaymentHash,
   },
-  openssl::x509::X509,
   std::convert::TryInto,
-  tonic::{
-    metadata::AsciiMetadataValue,
-    service::interceptor::{InterceptedService, Interceptor},
-    Code, Request, Status,
+  tonic_lnd::tonic::{
+    Code, Status,
   },
 };
 
@@ -39,23 +35,9 @@ pub mod lnrpc {
   }
 }
 
-#[derive(Clone)]
-struct MacaroonInterceptor {
-  macaroon: Option<AsciiMetadataValue>,
-}
-
-impl Interceptor for MacaroonInterceptor {
-  fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-    if let Some(macaroon) = &self.macaroon {
-      request.metadata_mut().insert("macaroon", macaroon.clone());
-    }
-    Ok(request)
-  }
-}
-
 #[derive(Debug, Clone)]
 pub struct Client {
-  inner: LightningClient<InterceptedService<HttpsService, MacaroonInterceptor>>,
+  inner: tonic_lnd::Client,
   #[cfg(test)]
   _lnd_test_context: Arc<LndTestContext>,
 }
@@ -63,19 +45,17 @@ pub struct Client {
 impl Client {
   pub async fn new(
     authority: Authority,
-    certificate: Option<X509>,
-    macaroon: Option<Vec<u8>>,
+    certificate_path: String,
+    macaroon_path: String,
     #[cfg(test)] lnd_test_context: LndTestContext,
   ) -> Result<Client, openssl::error::ErrorStack> {
-    let grpc_service = HttpsService::new(authority, certificate)?;
+      let address_str = &authority.as_str();
+      //let address = Endpoint::from_static(address_str);
 
-    let macaroon = macaroon.map(|macaroon| {
-      hex::encode_upper(macaroon)
-        .parse::<AsciiMetadataValue>()
-        .expect("Client::new: hex characters are valid metadata values")
-    });
-
-    let inner = LightningClient::with_interceptor(grpc_service, MacaroonInterceptor { macaroon });
+    // Connecting to LND requires only address, cert file, and macaroon file
+    let inner = tonic_lnd::connect("address_str", certificate_path, macaroon_path)
+        .await
+        .expect("failed to connect");
 
     Ok(Client {
       inner,
@@ -85,14 +65,9 @@ impl Client {
   }
 
   pub async fn ping(&mut self) -> Result<(), Status> {
-    let request = tonic::Request::new(ListInvoiceRequest {
-      index_offset: 0,
-      num_max_invoices: 0,
-      pending_only: false,
-      reversed: false,
-    });
+    let request = tonic_lnd::rpc::GetInfoRequest {};
 
-    self.inner.list_invoices(request).await?;
+    self.inner.get_info(request).await?;
 
     Ok(())
   }
@@ -102,7 +77,7 @@ impl Client {
     memo: &str,
     value_msat: Millisatoshi,
   ) -> Result<AddInvoiceResponse, Status> {
-    let request = tonic::Request::new(Invoice {
+    let request = tonic_lnd::rpc::Invoice {
       memo: memo.to_owned(),
       value_msat: value_msat.value().try_into().map_err(|source| {
         Status::new(
@@ -111,15 +86,17 @@ impl Client {
         )
       })?,
       ..Invoice::default()
-    });
+    };
+
     Ok(self.inner.add_invoice(request).await?.into_inner())
   }
 
   pub async fn lookup_invoice(&mut self, r_hash: [u8; 32]) -> Result<Option<Invoice>, Status> {
-    let request = tonic::Request::new(PaymentHash {
-      r_hash: r_hash.to_vec(),
-      ..PaymentHash::default()
-    });
+      let request = tonic_lnd::rpc::PaymentHash {
+	  r_hash: r_hash.to_vec(),
+	  ..PaymentHash::default()
+      };
+
     match self.inner.lookup_invoice(request).await {
       Ok(response) => Ok(Some(response.into_inner())),
       Err(status) => {
