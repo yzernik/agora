@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY . ./
 
-RUN cargo build --release
+RUN CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build --release
 
 FROM debian:buster-slim
 
